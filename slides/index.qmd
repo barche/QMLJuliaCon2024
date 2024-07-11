@@ -1,0 +1,404 @@
+---
+title: "What's new in QML.jl"
+author: "Bart Janssens"
+logo: "media/rma.svg"
+format:
+  revealjs:
+    theme: [beige, beige-adapt.scss]
+    code-block-height: 520px
+    chalkboard: false
+---
+
+## QML Basics
+:::: {.columns}
+
+::: {.column width="40%"}
+* Ingredients
+  * Julia program
+  * Qt QML file
+* Data exchange
+  * Observables
+  * Functions
+  * Models
+  * Julia displays, Makie and GR
+:::
+
+::: {.column width="60%"}
+![](media/basic.gif)
+:::
+
+::::
+
+## Julia code
+
+```{.julia code-line-numbers="3-7|9-10|14-16|18"}
+using QML, Observables
+
+const input = Observable(0)
+const output = Observable(0)
+on(input) do x
+  output[] = 2*x
+end
+
+reset_input() = (input[] = 0)
+@qmlfunction reset_input
+
+qml_file = joinpath(@__DIR__, "qml", "basic.qml")
+
+loadqml(qml_file,
+        juliaproperties = JuliaPropertyMap("input" => input,
+                                           "output" => output))
+exec()
+println("Output is ", output[])
+```
+
+## QML code
+
+:::: {.columns}
+
+::: {.column width="80%"}
+
+```{.qml}
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+import org.julialang
+
+ApplicationWindow {
+  title: "My Application"
+  width: 200; height: 150; visible: true
+  
+  ColumnLayout {
+    anchors.centerIn: parent
+
+    Text { text: "Enter a number:" }
+
+    TextField {
+      id: input
+      Layout.alignment: Qt.AlignCenter
+      width: 100
+      onTextChanged: {
+        x = parseInt(text);
+        if(!isNaN(x)) {
+          juliaproperties.input = x;
+        }
+      }
+      Component.onCompleted: { text = juliaproperties.input }
+    }
+
+    Text { text: "The double is: " + juliaproperties.output }
+
+    Button {
+      text: "Reset"
+      onClicked: {
+        Julia.reset_input();
+        input.text = juliaproperties.input
+      }
+    }
+  }
+}
+```
+
+:::
+
+::: {.column width="20%"}
+![](media/basic.gif)
+:::
+
+::::
+
+## This is what we will make
+
+![](media/tabeditor.mp4)
+
+## Qt Design Studio
+
+![](media/qtdesign-ff.mp4)
+
+## QML loading changes
+
+![](media/qmldiff.png)
+
+## TableEditor Julia code
+
+```{.julia}
+using QML, Observables, DataFrames, CSV
+
+qml_file = joinpath(@__DIR__, "qml", "tabeditor.qml")
+
+const datapath = joinpath(pkgdir(DataFrames), "docs", "src", "assets")
+const juliaproperties = JuliaPropertyMap(
+  "datapath" => datapath,
+  "tablemodel" => JuliaItemModel(DataFrame()),
+)
+
+loadeddataframe = DataFrame()
+
+function getheader(df::DataFrame, col_or_row, orientation, role)
+  if orientation == QML.Vertical
+    return col_or_row
+  end
+  return names(df)[col_or_row]
+end
+
+function setheader(df::DataFrame, col_or_row, orientation, value, role)
+  if orientation == QML.Horizontal
+    rename!(df, names(df)[col_or_row] => value)
+  end
+end
+
+function setelement(df::DataFrame, value::AbstractString, row, col)
+  dt = typeof(df[row,col])
+  if dt <: AbstractString
+    df[row,col] = value
+  else
+    df[row,col] = parse(dt, value)
+  end
+end
+
+function QML.insert_row!(m::QML.ItemModelData{DataFrame}, rowidx, row::AbstractVector{QVariant})
+  df = m.values[]
+  insert!(df, rowidx, df[rowidx,:])
+  return
+end
+
+function QML.insert_column!(m::QML.ItemModelData{DataFrame}, columnidx, column::AbstractVector{QVariant})
+  df = m.values[]
+  insertcols!(df,columnidx,(names(df)[columnidx]*"Copy" => df[!,columnidx]))
+  return
+end
+
+urltopath(filename) = String(QML.toString(filename)[8:end])
+
+function loaddataframe(filename)
+  global loadeddataframe = DataFrame(CSV.File(urltopath(filename);stringtype=String))
+  model = JuliaItemModel(loadeddataframe)
+  setheadergetter!(model, getheader)
+  setheadersetter!(model, setheader)
+  setsetter!(model, setelement, QML.EditRole)
+  juliaproperties["tablemodel"] = model
+  return
+end
+
+savedataframe(filename) = CSV.write(urltopath(filename), loadeddataframe)
+
+@qmlfunction loaddataframe savedataframe
+
+engine = loadqml(qml_file; juliaproperties)
+watchqml(engine, qml_file)
+exec()
+```
+
+## TableEditor QML code
+
+```{.qml}
+import QtQuick 6.7
+import QtQuick.Controls 6.7
+import QtQuick.Layouts
+import QtQuick.Dialogs
+import org.julialang
+
+ApplicationWindow {
+    title: "Table Editor"
+    width: 640
+    height: 480
+    visible: true
+    x: 1000
+    y: 200
+
+    ColumnLayout {
+        id: columnLayout
+        anchors.fill: parent
+
+        RowLayout {
+            id: rowLayout
+            width: 100
+            height: 100
+
+            Button {
+                id: button
+                text: qsTr("Load")
+                onClicked: loadDialog.open()
+            }
+
+            Button {
+                id: button1
+                text: qsTr("Save")
+                onClicked: saveDialog.open()
+            }
+        }
+
+        RowLayout {
+            id: rowLayout1
+
+            Item {
+                id: tablePane
+                Layout.fillHeight: true
+                Layout.fillWidth: true
+
+                HorizontalHeaderView {
+                    id: horizontalHeader
+                    syncView: tableView
+                    anchors.left: tableView.left
+                    clip: true
+                    selectionModel: ItemSelectionModel {}
+                    selectionBehavior: TableView.SelectCells
+                    editTriggers: TableView.DoubleTapped
+                    delegate: Item {
+                        implicitWidth: 100
+                        implicitHeight: delegateText.implicitHeight+2
+
+                        TextField {
+                            id: delegateText
+                            anchors.fill: parent
+                            text: display
+                            horizontalAlignment: TextInput.AlignHCenter
+                            verticalAlignment: TextInput.AlignVCenter
+                            onAccepted: {
+                                edit = text
+                            }
+                        }
+                    }
+                }
+
+                VerticalHeaderView {
+                    id: verticalHeader
+                    syncView: tableView
+                    anchors.top: tableView.top
+                    clip: true
+                }
+
+                TableView {
+                    id: tableView
+
+                    anchors.fill: parent
+                    anchors.topMargin: horizontalHeader.height
+                    anchors.leftMargin: verticalHeader.width
+
+                    columnSpacing: 1
+                    rowSpacing: 1
+                    clip: true
+
+                    model: juliaproperties.tablemodel
+                    selectionModel: ItemSelectionModel {}
+
+                    delegate: Rectangle {
+                        implicitWidth: 100
+                        implicitHeight: delegateText.implicitHeight+2
+                        required property bool selected
+                        required property bool current
+                        border.width: current ? 2 : 0
+                        color: selected ? "lightblue" : palette.base
+
+                        Text {
+                            id: delegateText
+                            anchors.centerIn: parent
+                            text: display
+                        }
+
+                        TableView.editDelegate: TextField {
+                            anchors.fill: parent
+                            text: display
+                            horizontalAlignment: TextInput.AlignHCenter
+                            verticalAlignment: TextInput.AlignVCenter
+                            Component.onCompleted: selectAll()
+
+                            TableView.onCommit: {
+                                edit = text
+                            }
+                        }
+                    }
+
+                    ScrollBar.vertical: ScrollBar {
+                        id: vbar
+                        visible: tableView.moving
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onEntered: vbar.visible = true
+                            onExited: vbar.visible = false
+                        }
+                    }
+                    ScrollBar.horizontal: ScrollBar {
+                        id: hbar
+                        visible: tableView.moving
+                        MouseArea {
+                            anchors.fill: parent
+                            onEntered: hbar.visible = true
+                            onExited: hbar.visible = false
+                        }
+                    }
+                }
+            }
+
+            ColumnLayout {
+                id: columnLayout1
+                width: 100
+                height: 100
+
+                Button {
+                    id: button2
+                    Layout.preferredWidth: 130
+                    text: qsTr("Insert row")
+                    onClicked: juliaproperties.tablemodel.insertRow(tableView.currentRow,[])
+                }
+
+                Button {
+                    id: button3
+                    Layout.preferredWidth: 130
+                    text: qsTr("Delete row")
+                    onClicked: juliaproperties.tablemodel.removeRow(tableView.currentRow);
+                }
+
+                Button {
+                    id: button4
+                    text: qsTr("Insert column")
+                    onClicked: juliaproperties.tablemodel.insertColumn(tableView.currentColumn,[])
+                }
+
+                Button {
+                    id: button5
+                    text: qsTr("Delete column")
+                    onClicked: juliaproperties.tablemodel.removeColumn(tableView.currentColumn);
+                }
+            }
+        }
+    }
+
+    FileDialog {
+        id: loadDialog
+        title: "Load CSV..."
+        currentFolder: Qt.resolvedUrl(juliaproperties.datapath)
+        onAccepted: Julia.loaddataframe(selectedFile)
+    }
+
+    FileDialog {
+        id: saveDialog
+        title: "Save CSV..."
+        fileMode: FileDialog.SaveFile
+        onAccepted: Julia.savedataframe(selectedFile)
+    }
+}
+```
+
+## Live coding
+
+![](media/livecode.gif)
+
+Thanks to Janis Erdmanis for the [suggestion](https://github.com/JuliaGraphics/QML.jl/issues/195)
+
+## What's new?
+
+* Qt 6
+  * This means Wayland!
+* JuliaItemModel
+* Live coding
+* Overall robustness
+
+## The future
+
+* Better Makie support
+* Seperate package for DataFrames functions
+* Improve live coding
+* WebView?
+* Threading integration

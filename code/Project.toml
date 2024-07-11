@@ -1,0 +1,6 @@
+[deps]
+CSV = "336ed68f-0bac-5ca0-87d4-7b16caf5d00b"
+CxxWrap = "1f15a43c-97ca-5a2a-ae31-89f07a497df4"
+DataFrames = "a93c6f00-e57d-5684-b7b6-d8193f3e46c0"
+Observables = "510215fc-4207-5dde-b226-833fc4488ee2"
+QML = "2db162a6-7e43-52c3-8d84-290c1c42d82a"

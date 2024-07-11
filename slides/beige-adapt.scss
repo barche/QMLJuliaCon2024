@@ -1,0 +1,24 @@
+/*-- scss:defaults --*/
+
+$heading1TextShadow: none;
+$headingTextTransform: none;
+$mainFont: Source Sans Pro, Helvetica, sans-serif;
+$headingFontWeight: 400;
+
+/*-- scss:rules --*/
+
+.reveal .slide img {
+  margin: auto;
+  display: block;
+}
+
+.footnote * {
+  font-size: small;
+}
+
+.reveal .slide-logo {
+  height: 10% !important;
+  width: 14% !important;
+  max-width: unset !important;
+  max-height: unset !important;
+}
